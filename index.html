@@ -1,0 +1,158 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>DDR GSD Heart Catchers Game</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link
+    href="https://fonts.googleapis.com/css2?family=Fredoka:wght@400;500;700&display=swap"
+    rel="stylesheet"
+  />
+  <link rel="stylesheet" href="ddr-game.css" />
+</head>
+<body>
+  <main class="page">
+    <!-- Start screen overlay -->
+    <div id="startScreen" class="overlay overlay--start">
+      <div class="overlay-card">
+        <h2 class="overlay-title">DDR GSD Heart Catchers Game</h2>
+        <p class="overlay-prompt">Press Space to Start</p>
+        <div class="difficulty-selector">
+          <span class="difficulty-label">Difficulty:</span>
+          <div class="difficulty-buttons">
+            <button type="button" class="difficulty-btn" data-difficulty="easy">Easy</button>
+            <button type="button" class="difficulty-btn difficulty-btn--active" data-difficulty="normal">Normal</button>
+            <button type="button" class="difficulty-btn" data-difficulty="hard">Hard</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Results screen overlay (hidden initially) -->
+    <div id="resultsScreen" class="overlay overlay--results overlay--hidden">
+      <div class="overlay-card">
+        <h2 class="overlay-title">Results</h2>
+        <div class="results-stats">
+          <p class="results-score">Score: <span id="resultsScore">0</span></p>
+          <p class="results-counts">
+            Perfect: <span id="resultsPerfect">0</span> ·
+            Good: <span id="resultsGood">0</span> ·
+            Miss: <span id="resultsMiss">0</span>
+          </p>
+        </div>
+        <button type="button" id="playAgainBtn" class="overlay-btn">Play Again</button>
+      </div>
+    </div>
+
+    <header class="top-bar">
+      <h1>DDR GSD Heart Catchers Game</h1>
+      <p class="instructions">Use the arrow keys (← ↓ ↑ →) to hit the falling notes in the hit zone.</p>
+    </header>
+
+    <section class="layout">
+      <section class="game-panel">
+        <div class="hud">
+          <div class="score-display">
+            Score: <span id="score">0</span>
+            <span class="combo-display">Combo x<span id="combo">0</span></span>
+          </div>
+          <div class="timer-display">Time: <span id="timeRemaining">60</span>s</div>
+          <div id="judgement" class="judgement"></div>
+        </div>
+
+        <div id="gameArea" class="game-area">
+          <div class="hit-line"></div>
+        </div>
+
+        <div class="lane-labels">
+          <span>←</span>
+          <span>↓</span>
+          <span>↑</span>
+          <span>→</span>
+        </div>
+
+        <div class="sound-controls">
+          <label class="sound-label">
+            <span>Volume</span>
+            <input type="range" id="volumeSlider" min="0" max="100" value="70" class="volume-slider" />
+            <span id="volumeValue" class="volume-value">70%</span>
+          </label>
+          <label class="sound-label sound-label--toggle">
+            <input type="checkbox" id="muteToggle" class="mute-checkbox" />
+            <span>Mute</span>
+          </label>
+          <label class="sound-label sound-label--toggle">
+            <input type="checkbox" id="shimmerToggle" class="shimmer-checkbox" />
+            <span>Background shimmer</span>
+          </label>
+        </div>
+
+        <p class="small-note">Press any arrow key to start the notes.</p>
+      </section>
+
+      <aside class="shepherd-panel">
+        <div class="shepherd-stage" id="shepherdStage">
+          <div class="shepherd-stage-floor"></div>
+          <div class="shepherd-dogs">
+            <div class="shepherd-dog shepherd-dog--black">
+              <div class="dog-body">
+                <div class="dog-head">
+                  <div class="dog-ear dog-ear--left"></div>
+                  <div class="dog-ear dog-ear--right"></div>
+                  <div class="dog-face"></div>
+                </div>
+                <div class="dog-leg dog-leg--front"></div>
+                <div class="dog-leg dog-leg--back"></div>
+                <div class="dog-tail"></div>
+              </div>
+            </div>
+
+            <div class="shepherd-dog shepherd-dog--sable">
+              <div class="dog-body">
+                <div class="dog-head">
+                  <div class="dog-ear dog-ear--left"></div>
+                  <div class="dog-ear dog-ear--right"></div>
+                  <div class="dog-face"></div>
+                </div>
+                <div class="dog-leg dog-leg--front"></div>
+                <div class="dog-leg dog-leg--back"></div>
+                <div class="dog-tail"></div>
+              </div>
+            </div>
+
+            <div class="shepherd-dog shepherd-dog--pink">
+              <div class="dog-body">
+                <div class="dog-head">
+                  <div class="dog-ear dog-ear--left"></div>
+                  <div class="dog-ear dog-ear--right"></div>
+                  <div class="dog-face"></div>
+                </div>
+                <div class="dog-leg dog-leg--front"></div>
+                <div class="dog-leg dog-leg--back"></div>
+                <div class="dog-tail"></div>
+              </div>
+            </div>
+
+            <div class="shepherd-dog shepherd-dog--blacktan">
+              <div class="dog-body">
+                <div class="dog-head">
+                  <div class="dog-ear dog-ear--left"></div>
+                  <div class="dog-ear dog-ear--right"></div>
+                  <div class="dog-face"></div>
+                </div>
+                <div class="dog-leg dog-leg--front"></div>
+                <div class="dog-leg dog-leg--back"></div>
+                <div class="dog-tail"></div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </aside>
+    </section>
+  </main>
+
+  <script src="ddr-game.js"></script>
+</body>
+</html>

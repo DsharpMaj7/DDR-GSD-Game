@@ -738,8 +738,10 @@ body::after {
 .shepherd-panel {
   flex: 1;
   display: flex;
+  flex-direction: column;
   align-items: stretch;
-  justify-content: center;
+  justify-content: flex-start;
+  gap: 0.85rem;
   border-radius: 1rem;
   padding: 1rem;
   background: linear-gradient(to bottom, #ecfffb, #c8fff0); /* soft mint gradient */
@@ -749,9 +751,57 @@ body::after {
     inset 0 0 18px rgba(255, 255, 255, 0.65);              /* inner highlight for gentle depth */
 }
 
+.shepherd-intro {
+  flex: 0 0 auto;
+  padding: 0.15rem 0.35rem 0;
+}
+
+.shepherd-intro-title {
+  margin: 0 0 0.65rem;
+  font-size: 1.35rem;
+  font-weight: 700;
+  color: #0f766e;
+  line-height: 1.25;
+}
+
+.shepherd-intro-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-size: 0.95rem;
+  font-weight: 400;
+  color: #115e59;
+  line-height: 1.45;
+}
+
+.shepherd-intro-list li {
+  display: flex;
+  gap: 0.5rem;
+  align-items: flex-start;
+  margin-bottom: 0.35rem;
+}
+
+.shepherd-intro-list li:last-child {
+  margin-bottom: 0;
+}
+
+.shepherd-intro-list li.shepherd-intro-break {
+  margin-top: 0.75rem;
+}
+
+/* Cute dog-bone markers instead of bullets */
+.shepherd-intro-list li::before {
+  content: "🦴";
+  flex-shrink: 0;
+  font-size: 0.95rem;
+  line-height: 1.45;
+  transform: translateY(0.02em);
+}
+
 .shepherd-stage {
   position: relative;
   flex: 1;
+  min-height: 200px;
   border-radius: 0.9rem;
   overflow: hidden;
   background: #c0f0ea; /* pastel blue */

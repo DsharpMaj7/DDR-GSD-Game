@@ -61,10 +61,12 @@
   let masterGain = null;
   let shimmerInterval = null;
   let shimmerBoardwalkInterval = null;
-  let shimmerWavyOsc = null;
-  let shimmerWavyGain = null;
-  let shimmerWavyTimeout = null;
   let shimmerStarryTimeout = null;
+  let shimmerBarkInterval = null;
+  let shimmerParkPadOscs = [];
+  let shimmerParkPadBus = null;
+  let shimmerParkPadHp = null;
+  let shimmerParkPadPk = null;
   let shimmerActive = false;
 
   function initAudio() {
@@ -134,143 +136,437 @@
     }
   }
 
+  /**
+   * Small songbird-like syllables: pitch sweeps, 2- and 3-note phrases,
+   * sine + faint triangle (more beak / whistle than a pure electronic tone).
+   */
   function playBirdChirp() {
     if (!audioCtx || !masterGain) return;
     const now = audioCtx.currentTime;
-    const osc = audioCtx.createOscillator();
-    const env = audioCtx.createGain();
-    osc.type = "sine";
-    const chirpPitches = [2480, 2880, 3240, 2680, 3080, 3560]; /* sunny, happy “tweet” range (Hz) */
-    osc.frequency.setValueAtTime(chirpPitches[Math.floor(Math.random() * chirpPitches.length)], now);
-    env.gain.setValueAtTime(0, now);
-    env.gain.linearRampToValueAtTime(0.012, now + 0.018);
-    env.gain.linearRampToValueAtTime(0, now + 0.09);
-    osc.connect(env);
-    env.connect(masterGain);
-    osc.start(now);
-    osc.stop(now + 0.1);
+    const base = 2450 + Math.random() * 1050;
+
+    function birdSyllable(t0, dur, fStart, fEnd, peak) {
+      if (dur < 0.018) return;
+      const env = audioCtx.createGain();
+      env.gain.setValueAtTime(0, t0);
+      const atk = Math.min(0.012, dur * 0.25);
+      env.gain.linearRampToValueAtTime(peak, t0 + atk);
+      env.gain.linearRampToValueAtTime(0, t0 + dur);
+      env.connect(masterGain);
+
+      const sine = audioCtx.createOscillator();
+      sine.type = "sine";
+      sine.frequency.setValueAtTime(fStart, t0);
+      sine.frequency.linearRampToValueAtTime(fEnd, t0 + dur * 0.92);
+
+      const formant = audioCtx.createOscillator();
+      formant.type = "triangle";
+      formant.frequency.setValueAtTime(fStart * 1.004, t0);
+      formant.frequency.linearRampToValueAtTime(fEnd * 1.004, t0 + dur * 0.92);
+
+      const gS = audioCtx.createGain();
+      const gT = audioCtx.createGain();
+      gS.gain.value = 0.74;
+      gT.gain.value = 0.2;
+
+      sine.connect(gS);
+      formant.connect(gT);
+      gS.connect(env);
+      gT.connect(env);
+      sine.start(t0);
+      formant.start(t0);
+      const stop = t0 + dur + 0.025;
+      sine.stop(stop);
+      formant.stop(stop);
+    }
+
+    const roll = Math.random();
+    if (roll < 0.3) {
+      /* Single descending whistle */
+      birdSyllable(now, 0.078 + Math.random() * 0.02, base * (1.12 + Math.random() * 0.08), base * (0.62 + Math.random() * 0.1), 0.008);
+    } else if (roll < 0.58) {
+      /* Classic two-part chirp */
+      birdSyllable(now, 0.032 + Math.random() * 0.012, base * 1.06, base * (0.94 + Math.random() * 0.06), 0.007);
+      birdSyllable(now + 0.04 + Math.random() * 0.018, 0.058 + Math.random() * 0.02, base * (1.1 + Math.random() * 0.06), base * (0.68 + Math.random() * 0.12), 0.0078);
+    } else if (roll < 0.78) {
+      /* Up-flick then longer answer (phoebe / finch-like) */
+      birdSyllable(now, 0.026, base * 0.9, base * 1.08, 0.0065);
+      birdSyllable(now + 0.03, 0.055 + Math.random() * 0.02, base * (1.08 + Math.random() * 0.05), base * (0.7 + Math.random() * 0.1), 0.0075);
+    } else {
+      /* Staccato triple (sparrows) */
+      const a = 0.019 + Math.random() * 0.006;
+      const b = 0.019 + Math.random() * 0.006;
+      birdSyllable(now, a, base * 1.02, base * 0.98, 0.0059);
+      birdSyllable(now + a + 0.004, b, base * 1.1, base * 1.04, 0.0059);
+      birdSyllable(now + a + b + 0.012, 0.038 + Math.random() * 0.015, base * 1.06, base * (0.74 + Math.random() * 0.08), 0.007);
+    }
   }
 
+  /**
+   * Small-dog woof: brown-noise breath (less hiss than white), bandpass “vocal” sweep,
+   * highpass to clear mud, plus rounded low body — reads clearly as a yap, not a sparkle.
+   */
+  function playCuteBark() {
+    if (!audioCtx || !masterGain) return;
+    function oneYip(t0, len, brightness) {
+      if (len < 0.03) return;
+      const rate = audioCtx.sampleRate;
+      const samples = Math.max(960, Math.floor(rate * len));
+      const buf = audioCtx.createBuffer(1, samples, rate);
+      const d = buf.getChannelData(0);
+      let brown = 0;
+      for (let i = 0; i < samples; i++) {
+        brown = brown * 0.988 + (Math.random() * 2 - 1) * 0.26;
+        d[i] = Math.max(-1, Math.min(1, brown));
+      }
+
+      const mix = audioCtx.createGain();
+      mix.gain.value = 1;
+      mix.connect(masterGain);
+
+      const src = audioCtx.createBufferSource();
+      src.buffer = buf;
+      const hp = audioCtx.createBiquadFilter();
+      hp.type = "highpass";
+      hp.frequency.setValueAtTime(220, t0);
+      hp.Q.value = 0.65;
+      const bp = audioCtx.createBiquadFilter();
+      bp.type = "bandpass";
+      const f0 = 1280 + brightness * 820 + Math.random() * 160;
+      const f1 = 580 + brightness * 160 + Math.random() * 70;
+      bp.frequency.setValueAtTime(f0, t0);
+      bp.frequency.linearRampToValueAtTime(f1, t0 + len * 0.86);
+      bp.Q.value = 1.55 + Math.random() * 0.45;
+
+      const nEnv = audioCtx.createGain();
+      nEnv.gain.setValueAtTime(0, t0);
+      nEnv.gain.linearRampToValueAtTime(0.0068 + Math.random() * 0.0025, t0 + 0.006);
+      nEnv.gain.linearRampToValueAtTime(0.005, t0 + len * 0.22);
+      nEnv.gain.linearRampToValueAtTime(0.0012, t0 + len * 0.62);
+      nEnv.gain.linearRampToValueAtTime(0, t0 + len);
+
+      src.connect(hp);
+      hp.connect(bp);
+      bp.connect(nEnv);
+      nEnv.connect(mix);
+
+      const body = audioCtx.createOscillator();
+      body.type = "triangle";
+      body.frequency.setValueAtTime(265 + Math.random() * 55, t0);
+      body.frequency.linearRampToValueAtTime(145 + Math.random() * 35, t0 + len * 0.82);
+      const bEnv = audioCtx.createGain();
+      bEnv.gain.setValueAtTime(0, t0);
+      bEnv.gain.linearRampToValueAtTime(0.0048 + Math.random() * 0.0012, t0 + 0.014);
+      bEnv.gain.linearRampToValueAtTime(0.001, t0 + len * 0.45);
+      bEnv.gain.linearRampToValueAtTime(0, t0 + len * 0.98);
+      body.connect(bEnv);
+      bEnv.connect(mix);
+
+      const ruff = audioCtx.createOscillator();
+      ruff.type = "sine";
+      ruff.frequency.setValueAtTime(620 + Math.random() * 120, t0);
+      ruff.frequency.linearRampToValueAtTime(340 + Math.random() * 80, t0 + len * 0.55);
+      const rEnv = audioCtx.createGain();
+      rEnv.gain.setValueAtTime(0, t0);
+      rEnv.gain.linearRampToValueAtTime(0.0024, t0 + 0.008);
+      rEnv.gain.linearRampToValueAtTime(0, t0 + len * 0.42);
+      ruff.connect(rEnv);
+      rEnv.connect(mix);
+
+      const stopT = t0 + len + 0.035;
+      src.start(t0);
+      body.start(t0);
+      ruff.start(t0);
+      src.stop(stopT);
+      body.stop(stopT);
+      ruff.stop(stopT);
+    }
+
+    const now = audioCtx.currentTime;
+    const roll = Math.random();
+    if (roll < 0.52) {
+      oneYip(now, 0.076 + Math.random() * 0.022, 0.88);
+    } else if (roll < 0.82) {
+      const a = 0.036 + Math.random() * 0.01;
+      oneYip(now, a, 0.92);
+      oneYip(now + a + 0.08 + Math.random() * 0.04, 0.05 + Math.random() * 0.018, 0.65);
+    } else {
+      const a = 0.03 + Math.random() * 0.008;
+      const b = 0.028 + Math.random() * 0.006;
+      oneYip(now, a, 0.95);
+      oneYip(now + a + 0.055, b, 0.88);
+      oneYip(now + a + b + 0.09, 0.048 + Math.random() * 0.015, 0.55);
+    }
+  }
+
+  /** D♯maj7 pad — soft chorus + light triangle for bubble / shimmer; slow breath on level. */
+  function startSunshineParkPad() {
+    if (!audioCtx || !masterGain || shimmerParkPadOscs.length) return;
+    const t = audioCtx.currentTime;
+    const bus = audioCtx.createGain();
+    bus.gain.setValueAtTime(0.00235, t);
+    shimmerParkPadBus = bus;
+
+    const hp = audioCtx.createBiquadFilter();
+    hp.type = "highpass";
+    hp.frequency.value = 130;
+    hp.Q.value = 0.35;
+    const pk = audioCtx.createBiquadFilter();
+    pk.type = "peaking";
+    pk.frequency.value = 2650;
+    pk.Q.value = 0.55;
+    pk.gain.value = 4.0;
+    hp.connect(pk);
+    pk.connect(bus);
+    bus.connect(masterGain);
+    shimmerParkPadHp = hp;
+    shimmerParkPadPk = pk;
+
+    /* Very slow swell — keeps the pad from feeling like a static tone. */
+    const breath = audioCtx.createOscillator();
+    breath.type = "sine";
+    breath.frequency.setValueAtTime(0.1, t);
+    const breathAmt = audioCtx.createGain();
+    breathAmt.gain.value = 0.00038;
+    breath.connect(breathAmt);
+    breathAmt.connect(bus.gain);
+    breath.start(t);
+    shimmerParkPadOscs.push(breath);
+
+    /* D♯4, G4, A♯4, D5 — close maj7 (12-TET). */
+    const layers = [
+      { f: 311.127, w: 0.35 },
+      { f: 391.995, w: 0.31 },
+      { f: 466.164, w: 0.27 },
+      { f: 587.33, w: 0.17 },
+    ];
+    const human = () => (Math.random() - 0.5) * 1.2;
+
+    layers.forEach(({ f, w }) => {
+      const triWeight = f > 520 ? 0.09 : 0.15;
+      const voices = [
+        { type: "sine", det: 0, frac: 0.45 },
+        { type: "sine", det: 7.2, frac: 0.28 },
+        { type: "sine", det: -7.2, frac: 0.28 },
+        { type: "triangle", det: 2.5, frac: triWeight },
+      ];
+      voices.forEach(({ type, det, frac }) => {
+        const o = audioCtx.createOscillator();
+        o.type = type;
+        o.frequency.setValueAtTime(f, t);
+        o.detune.setValueAtTime(det + human(), t);
+        const g = audioCtx.createGain();
+        g.gain.value = w * frac;
+        o.connect(g);
+        g.connect(hp);
+        o.start(t);
+        shimmerParkPadOscs.push(o);
+      });
+    });
+  }
+
+  function stopSunshineParkPad() {
+    shimmerParkPadOscs.forEach((o) => {
+      try {
+        o.stop();
+      } catch (_) {}
+    });
+    shimmerParkPadOscs = [];
+    if (shimmerParkPadPk) {
+      try {
+        shimmerParkPadPk.disconnect();
+      } catch (_) {}
+      shimmerParkPadPk = null;
+    }
+    if (shimmerParkPadHp) {
+      try {
+        shimmerParkPadHp.disconnect();
+      } catch (_) {}
+      shimmerParkPadHp = null;
+    }
+    if (shimmerParkPadBus) {
+      try {
+        shimmerParkPadBus.disconnect();
+      } catch (_) {}
+      shimmerParkPadBus = null;
+    }
+  }
+
+  /**
+   * Bubblegum bells — bright, bouncy, no slow vibrato (that reads “sly”); clean happy pops.
+   */
   function playBoardwalkPhrase() {
     if (!audioCtx || !masterGain) return;
-    const noteMs = 140;
-    const gapMs = 55;
-    const stepMs = noteMs + gapMs;
     const phrases = [
-      [523, 659, 784, 659],
-      [587, 740, 880, 740],
-      [523, 659, 880, 659],
-      [659, 784, 988, 784]
+      [1047, 1175, 1319, 1398],
+      [1175, 1319, 1398, 1568],
+      [988, 1047, 1175, 1319],
+      [1047, 1175, 1245, 1319],
     ];
     const phrase = phrases[Math.floor(Math.random() * phrases.length)];
+    let tMs = 0;
+
     phrase.forEach((freq, i) => {
-      const startAt = i * stepMs;
+      const humanMs = (Math.random() - 0.5) * 4;
+      const noteLenMs = 118 + Math.random() * 28;
+      const gapMs = 44 + Math.random() * 22 + (i % 2 === 0 ? 6 : 0);
+      const startAt = Math.max(0, tMs + humanMs);
+      tMs = startAt + noteLenMs + gapMs;
+
       setTimeout(() => {
         if (!shimmerActive || !audioCtx || !masterGain) return;
         const now = audioCtx.currentTime;
+        const dur = noteLenMs / 1000;
+        const stopT = now + dur + 0.16;
+        const centsDrift = (Math.random() - 0.5) * 3;
+
+        const out = audioCtx.createGain();
+        out.gain.setValueAtTime(1, now);
+        out.connect(masterGain);
+
+        const filter = audioCtx.createBiquadFilter();
+        filter.type = "lowpass";
+        filter.frequency.setValueAtTime(5600 + Math.random() * 700, now);
+        filter.Q.value = 0.14;
+
+        const bloom = Math.min(0.028, dur * 0.22);
         const osc = audioCtx.createOscillator();
+        osc.type = "sine";
+        osc.detune.setValueAtTime(centsDrift, now);
+        osc.frequency.setValueAtTime(freq * 1.004, now);
+        osc.frequency.linearRampToValueAtTime(freq, now + bloom);
+
+        const oscB = audioCtx.createOscillator();
+        oscB.type = "triangle";
+        oscB.detune.setValueAtTime(centsDrift + 12, now);
+        oscB.frequency.setValueAtTime(freq * 1.004, now);
+        oscB.frequency.linearRampToValueAtTime(freq, now + bloom);
+
+        const gA = audioCtx.createGain();
+        const gB = audioCtx.createGain();
+        gA.gain.value = 0.72;
+        gB.gain.value = 0.14;
+
         const env = audioCtx.createGain();
-        osc.type = "triangle";
-        osc.frequency.setValueAtTime(freq, now);
         env.gain.setValueAtTime(0, now);
-        env.gain.linearRampToValueAtTime(0.022, now + 0.03);
-        env.gain.linearRampToValueAtTime(0, now + noteMs / 1000);
-        osc.connect(env);
-        env.connect(masterGain);
+        const peak = 0.0054 + Math.random() * 0.0009;
+        env.gain.linearRampToValueAtTime(peak, now + 0.022 + Math.random() * 0.008);
+        env.gain.linearRampToValueAtTime(peak * 0.58, now + dur * 0.48);
+        env.gain.linearRampToValueAtTime(0, now + dur + 0.16);
+
+        osc.connect(gA);
+        oscB.connect(gB);
+        gA.connect(filter);
+        gB.connect(filter);
+        filter.connect(env);
+        env.connect(out);
+
+        const h2 = audioCtx.createOscillator();
+        h2.type = "sine";
+        h2.frequency.setValueAtTime(freq * 2.0, now);
+        const e2 = audioCtx.createGain();
+        e2.gain.setValueAtTime(0, now);
+        e2.gain.linearRampToValueAtTime(0.00115, now + 0.028);
+        e2.gain.linearRampToValueAtTime(0, now + dur * 0.5 + 0.05);
+        h2.connect(e2);
+        e2.connect(out);
+
         osc.start(now);
-        osc.stop(now + noteMs / 1000 + 0.02);
-        /* glossy: soft octave-up overtone */
-        const hi = audioCtx.createOscillator();
-        const hiEnv = audioCtx.createGain();
-        hi.type = "sine";
-        hi.frequency.setValueAtTime(freq * 2, now);
-        hiEnv.gain.setValueAtTime(0, now);
-        hiEnv.gain.linearRampToValueAtTime(0.006, now + 0.02);
-        hiEnv.gain.linearRampToValueAtTime(0, now + 0.07);
-        hi.connect(hiEnv);
-        hiEnv.connect(masterGain);
-        hi.start(now);
-        hi.stop(now + 0.08);
+        osc.stop(stopT);
+        oscB.start(now);
+        oscB.stop(stopT);
+        h2.start(now);
+        h2.stop(stopT);
       }, startAt);
     });
   }
 
+  /** Quick sugary glint — bright, short, fizzy (not a long mysterious tail). */
   function playStarryPing() {
     if (!audioCtx || !masterGain) return;
     const now = audioCtx.currentTime;
-    const osc = audioCtx.createOscillator();
-    const env = audioCtx.createGain();
-    osc.type = "sine";
-    osc.frequency.setValueAtTime(3400 + Math.random() * 800, now);
-    env.gain.setValueAtTime(0, now);
-    env.gain.linearRampToValueAtTime(0.007, now + 0.012);
-    env.gain.linearRampToValueAtTime(0, now + 0.05);
-    osc.connect(env);
-    env.connect(masterGain);
-    osc.start(now);
-    osc.stop(now + 0.055);
-  }
+    const fairyHz = [2637.02, 2793.83, 3135.96, 3520.0];
+    const root = fairyHz[Math.floor(Math.random() * fairyHz.length)];
+    const stopT = now + 0.11;
 
-  function startWavyPad() {
-    if (!audioCtx || !masterGain || shimmerWavyOsc) return;
-    shimmerWavyOsc = audioCtx.createOscillator();
-    shimmerWavyGain = audioCtx.createGain();
-    shimmerWavyOsc.type = "sine";
-    shimmerWavyGain.gain.setValueAtTime(0.006, audioCtx.currentTime);
-    shimmerWavyOsc.connect(shimmerWavyGain);
-    shimmerWavyGain.connect(masterGain);
-    shimmerWavyOsc.start(audioCtx.currentTime);
-    const wavyFreqs = [360, 500, 420, 560, 400, 480];
-    let wavyIndex = 0;
-    const scheduleWavyGlide = () => {
-      if (!shimmerActive || !shimmerWavyOsc || !audioCtx) return;
-      const t = audioCtx.currentTime;
-      const nextIndex = (wavyIndex + 1) % wavyFreqs.length;
-      const toFreq = wavyFreqs[nextIndex];
-      shimmerWavyOsc.frequency.cancelScheduledValues(t);
-      shimmerWavyOsc.frequency.setValueAtTime(wavyFreqs[wavyIndex], t);
-      shimmerWavyOsc.frequency.linearRampToValueAtTime(toFreq, t + 2.2);
-      wavyIndex = nextIndex;
-      shimmerWavyTimeout = setTimeout(scheduleWavyGlide, 2300);
-    };
-    shimmerWavyOsc.frequency.setValueAtTime(wavyFreqs[0], audioCtx.currentTime);
-    scheduleWavyGlide();
+    const air = audioCtx.createBiquadFilter();
+    air.type = "lowpass";
+    air.frequency.setValueAtTime(7200, now);
+    air.Q.value = 0.22;
+
+    const out = audioCtx.createGain();
+    out.connect(air);
+    air.connect(masterGain);
+
+    const osc = audioCtx.createOscillator();
+    osc.type = "sine";
+    osc.frequency.setValueAtTime(root, now);
+
+    const env = audioCtx.createGain();
+    env.gain.setValueAtTime(0, now);
+    env.gain.linearRampToValueAtTime(0.0029 + Math.random() * 0.0007, now + 0.011);
+    env.gain.linearRampToValueAtTime(0, now + 0.084);
+    osc.connect(env);
+    env.connect(out);
+
+    const h = audioCtx.createOscillator();
+    h.type = "sine";
+    h.frequency.setValueAtTime(root * 2, now);
+    const he = audioCtx.createGain();
+    he.gain.setValueAtTime(0, now);
+    he.gain.linearRampToValueAtTime(0.00055, now + 0.018);
+    he.gain.linearRampToValueAtTime(0, now + 0.065);
+    h.connect(he);
+    he.connect(out);
+
+    osc.start(now);
+    osc.stop(stopT);
+    h.start(now);
+    h.stop(stopT);
   }
 
   function scheduleStarryPing() {
     if (!shimmerActive) return;
     playStarryPing();
-    shimmerStarryTimeout = setTimeout(scheduleStarryPing, 2200 + Math.random() * 1600);
+    shimmerStarryTimeout = setTimeout(scheduleStarryPing, 1350 + Math.random() * 800);
+  }
+
+  function scheduleShimmerBark() {
+    if (!shimmerActive) return;
+    playCuteBark();
+    shimmerBarkInterval = setTimeout(scheduleShimmerBark, 4000 + Math.random() * 2200);
   }
 
   function startShimmer() {
     if (!audioCtx || !masterGain || shimmerActive) return;
     shimmerActive = true;
+    startSunshineParkPad();
     const scheduleChirp = () => {
       if (!shimmerActive) return;
       playBirdChirp();
-      if (Math.random() < 0.28) {
+      if (Math.random() < 0.34) {
         setTimeout(() => {
           if (shimmerActive) playBirdChirp();
-        }, 90);
+        }, 85);
       }
-      const delay = 2200 + Math.random() * 2000;
+      const delay = 1550 + Math.random() * 950;
       shimmerInterval = setTimeout(scheduleChirp, delay);
     };
     const scheduleBoardwalk = () => {
       if (!shimmerActive) return;
       playBoardwalkPhrase();
-      const delay = 2100 + Math.random() * 1400;
+      const delay = 1380 + Math.random() * 620;
       shimmerBoardwalkInterval = setTimeout(scheduleBoardwalk, delay);
     };
     scheduleChirp();
     scheduleBoardwalk();
-    startWavyPad();
     scheduleStarryPing();
+    scheduleShimmerBark();
   }
 
   function stopShimmer() {
     shimmerActive = false;
+    stopSunshineParkPad();
     if (shimmerInterval) {
       clearTimeout(shimmerInterval);
       shimmerInterval = null;
@@ -279,20 +575,13 @@
       clearTimeout(shimmerBoardwalkInterval);
       shimmerBoardwalkInterval = null;
     }
-    if (shimmerWavyTimeout) {
-      clearTimeout(shimmerWavyTimeout);
-      shimmerWavyTimeout = null;
-    }
     if (shimmerStarryTimeout) {
       clearTimeout(shimmerStarryTimeout);
       shimmerStarryTimeout = null;
     }
-    if (shimmerWavyOsc && audioCtx) {
-      try {
-        shimmerWavyOsc.stop(audioCtx.currentTime + 0.05);
-      } catch (_) {}
-      shimmerWavyOsc = null;
-      shimmerWavyGain = null;
+    if (shimmerBarkInterval) {
+      clearTimeout(shimmerBarkInterval);
+      shimmerBarkInterval = null;
     }
   }
 

@@ -20,9 +20,19 @@
     return;
   }
 
-  const HIT_Y = 320; // vertical hit position in px inside game area
+  const HIT_Y = 320; // vertical hit position in px inside game area (ideal catch line)
   const GAME_DURATION = 60000; // ms (60 seconds)
   const LANES = ["ArrowLeft", "ArrowDown", "ArrowUp", "ArrowRight"];
+
+  /** Judgement: tight band around HIT_Y for Perfect. */
+  const PERFECT_HALF_PX = 16;
+  /** Wider valid Good catch band (symmetric around HIT_Y). */
+  const GOOD_HALF_PX = 40;
+  /**
+   * Early input buffer: correct key before Good zone can still catch if heart
+   * enters Good within this window (ms). 200ms is within 150–250ms spec.
+   */
+  const INPUT_BUFFER_MS = 200;
 
   const DIFFICULTY = {
     easy:   { noteSpeed: 180, spawnInterval: 900 },
@@ -48,6 +58,9 @@
   let gameAreaFeedbackTimeout = null;
   const hitLine = gameArea.querySelector(".hit-line");
 
+  /** @type {(null | { expiresAt: number })[]} one optional buffered press per lane */
+  let laneInputBuffers = [null, null, null, null];
+
   gameArea.appendChild(hitEffects);
 
   // —— Web Audio (bubbly SFX, no external files) ——
@@ -59,15 +72,7 @@
   // - Audio: env.gain (0.28/0.16/0.12), osc.frequency values, filter.frequency (playJudgementSound below).
   let audioCtx = null;
   let masterGain = null;
-  let shimmerInterval = null;
-  let shimmerBoardwalkInterval = null;
-  let shimmerStarryTimeout = null;
-  let shimmerBarkInterval = null;
-  let shimmerParkPadOscs = [];
-  let shimmerParkPadBus = null;
-  let shimmerParkPadHp = null;
-  let shimmerParkPadPk = null;
-  let shimmerActive = false;
+  let bgMusic = null;
 
   function initAudio() {
     if (audioCtx) return;
@@ -75,10 +80,6 @@
     masterGain = audioCtx.createGain();
     masterGain.gain.value = (document.getElementById("volumeSlider")?.value ?? 70) / 100;
     masterGain.connect(audioCtx.destination);
-  }
-
-  function getMasterGain() {
-    return masterGain ? masterGain.gain.value : 0;
   }
 
   function setMasterVolume(linear) {
@@ -136,453 +137,54 @@
     }
   }
 
-  /**
-   * Small songbird-like syllables: pitch sweeps, 2- and 3-note phrases,
-   * sine + faint triangle (more beak / whistle than a pure electronic tone).
-   */
-  function playBirdChirp() {
-    if (!audioCtx || !masterGain) return;
-    const now = audioCtx.currentTime;
-    const base = 2450 + Math.random() * 1050;
+  const BGM_PATH = "assets/audio/lofi_nemuko-kawaii-lofi-217666.mp3";
+  /** Peak BGM loudness factor; multiplied by volume slider (0–1). Target ~0.25–0.4 effective max. */
+  const BGM_LEVEL = 0.32;
 
-    function birdSyllable(t0, dur, fStart, fEnd, peak) {
-      if (dur < 0.018) return;
-      const env = audioCtx.createGain();
-      env.gain.setValueAtTime(0, t0);
-      const atk = Math.min(0.012, dur * 0.25);
-      env.gain.linearRampToValueAtTime(peak, t0 + atk);
-      env.gain.linearRampToValueAtTime(0, t0 + dur);
-      env.connect(masterGain);
-
-      const sine = audioCtx.createOscillator();
-      sine.type = "sine";
-      sine.frequency.setValueAtTime(fStart, t0);
-      sine.frequency.linearRampToValueAtTime(fEnd, t0 + dur * 0.92);
-
-      const formant = audioCtx.createOscillator();
-      formant.type = "triangle";
-      formant.frequency.setValueAtTime(fStart * 1.004, t0);
-      formant.frequency.linearRampToValueAtTime(fEnd * 1.004, t0 + dur * 0.92);
-
-      const gS = audioCtx.createGain();
-      const gT = audioCtx.createGain();
-      gS.gain.value = 0.74;
-      gT.gain.value = 0.2;
-
-      sine.connect(gS);
-      formant.connect(gT);
-      gS.connect(env);
-      gT.connect(env);
-      sine.start(t0);
-      formant.start(t0);
-      const stop = t0 + dur + 0.025;
-      sine.stop(stop);
-      formant.stop(stop);
-    }
-
-    const roll = Math.random();
-    if (roll < 0.3) {
-      /* Single descending whistle */
-      birdSyllable(now, 0.078 + Math.random() * 0.02, base * (1.12 + Math.random() * 0.08), base * (0.62 + Math.random() * 0.1), 0.008);
-    } else if (roll < 0.58) {
-      /* Classic two-part chirp */
-      birdSyllable(now, 0.032 + Math.random() * 0.012, base * 1.06, base * (0.94 + Math.random() * 0.06), 0.007);
-      birdSyllable(now + 0.04 + Math.random() * 0.018, 0.058 + Math.random() * 0.02, base * (1.1 + Math.random() * 0.06), base * (0.68 + Math.random() * 0.12), 0.0078);
-    } else if (roll < 0.78) {
-      /* Up-flick then longer answer (phoebe / finch-like) */
-      birdSyllable(now, 0.026, base * 0.9, base * 1.08, 0.0065);
-      birdSyllable(now + 0.03, 0.055 + Math.random() * 0.02, base * (1.08 + Math.random() * 0.05), base * (0.7 + Math.random() * 0.1), 0.0075);
-    } else {
-      /* Staccato triple (sparrows) */
-      const a = 0.019 + Math.random() * 0.006;
-      const b = 0.019 + Math.random() * 0.006;
-      birdSyllable(now, a, base * 1.02, base * 0.98, 0.0059);
-      birdSyllable(now + a + 0.004, b, base * 1.1, base * 1.04, 0.0059);
-      birdSyllable(now + a + b + 0.012, 0.038 + Math.random() * 0.015, base * 1.06, base * (0.74 + Math.random() * 0.08), 0.007);
-    }
+  function ensureBgMusic() {
+    if (bgMusic) return bgMusic;
+    bgMusic = new Audio(BGM_PATH);
+    bgMusic.loop = true;
+    bgMusic.preload = "auto";
+    return bgMusic;
   }
 
-  /**
-   * Small-dog woof: brown-noise breath (less hiss than white), bandpass “vocal” sweep,
-   * highpass to clear mud, plus rounded low body — reads clearly as a yap, not a sparkle.
-   */
-  function playCuteBark() {
-    if (!audioCtx || !masterGain) return;
-    function oneYip(t0, len, brightness) {
-      if (len < 0.03) return;
-      const rate = audioCtx.sampleRate;
-      const samples = Math.max(960, Math.floor(rate * len));
-      const buf = audioCtx.createBuffer(1, samples, rate);
-      const d = buf.getChannelData(0);
-      let brown = 0;
-      for (let i = 0; i < samples; i++) {
-        brown = brown * 0.988 + (Math.random() * 2 - 1) * 0.26;
-        d[i] = Math.max(-1, Math.min(1, brown));
-      }
-
-      const mix = audioCtx.createGain();
-      mix.gain.value = 1;
-      mix.connect(masterGain);
-
-      const src = audioCtx.createBufferSource();
-      src.buffer = buf;
-      const hp = audioCtx.createBiquadFilter();
-      hp.type = "highpass";
-      hp.frequency.setValueAtTime(220, t0);
-      hp.Q.value = 0.65;
-      const bp = audioCtx.createBiquadFilter();
-      bp.type = "bandpass";
-      const f0 = 1280 + brightness * 820 + Math.random() * 160;
-      const f1 = 580 + brightness * 160 + Math.random() * 70;
-      bp.frequency.setValueAtTime(f0, t0);
-      bp.frequency.linearRampToValueAtTime(f1, t0 + len * 0.86);
-      bp.Q.value = 1.55 + Math.random() * 0.45;
-
-      const nEnv = audioCtx.createGain();
-      nEnv.gain.setValueAtTime(0, t0);
-      nEnv.gain.linearRampToValueAtTime(0.0068 + Math.random() * 0.0025, t0 + 0.006);
-      nEnv.gain.linearRampToValueAtTime(0.005, t0 + len * 0.22);
-      nEnv.gain.linearRampToValueAtTime(0.0012, t0 + len * 0.62);
-      nEnv.gain.linearRampToValueAtTime(0, t0 + len);
-
-      src.connect(hp);
-      hp.connect(bp);
-      bp.connect(nEnv);
-      nEnv.connect(mix);
-
-      const body = audioCtx.createOscillator();
-      body.type = "triangle";
-      body.frequency.setValueAtTime(265 + Math.random() * 55, t0);
-      body.frequency.linearRampToValueAtTime(145 + Math.random() * 35, t0 + len * 0.82);
-      const bEnv = audioCtx.createGain();
-      bEnv.gain.setValueAtTime(0, t0);
-      bEnv.gain.linearRampToValueAtTime(0.0048 + Math.random() * 0.0012, t0 + 0.014);
-      bEnv.gain.linearRampToValueAtTime(0.001, t0 + len * 0.45);
-      bEnv.gain.linearRampToValueAtTime(0, t0 + len * 0.98);
-      body.connect(bEnv);
-      bEnv.connect(mix);
-
-      const ruff = audioCtx.createOscillator();
-      ruff.type = "sine";
-      ruff.frequency.setValueAtTime(620 + Math.random() * 120, t0);
-      ruff.frequency.linearRampToValueAtTime(340 + Math.random() * 80, t0 + len * 0.55);
-      const rEnv = audioCtx.createGain();
-      rEnv.gain.setValueAtTime(0, t0);
-      rEnv.gain.linearRampToValueAtTime(0.0024, t0 + 0.008);
-      rEnv.gain.linearRampToValueAtTime(0, t0 + len * 0.42);
-      ruff.connect(rEnv);
-      rEnv.connect(mix);
-
-      const stopT = t0 + len + 0.035;
-      src.start(t0);
-      body.start(t0);
-      ruff.start(t0);
-      src.stop(stopT);
-      body.stop(stopT);
-      ruff.stop(stopT);
-    }
-
-    const now = audioCtx.currentTime;
-    const roll = Math.random();
-    if (roll < 0.52) {
-      oneYip(now, 0.076 + Math.random() * 0.022, 0.88);
-    } else if (roll < 0.82) {
-      const a = 0.036 + Math.random() * 0.01;
-      oneYip(now, a, 0.92);
-      oneYip(now + a + 0.08 + Math.random() * 0.04, 0.05 + Math.random() * 0.018, 0.65);
-    } else {
-      const a = 0.03 + Math.random() * 0.008;
-      const b = 0.028 + Math.random() * 0.006;
-      oneYip(now, a, 0.95);
-      oneYip(now + a + 0.055, b, 0.88);
-      oneYip(now + a + b + 0.09, 0.048 + Math.random() * 0.015, 0.55);
-    }
+  function syncBgMusicVolumeFromUi() {
+    if (!bgMusic) return;
+    const muted = document.getElementById("muteToggle")?.checked;
+    const pct = parseInt(document.getElementById("volumeSlider")?.value ?? "70", 10) / 100;
+    bgMusic.volume = muted ? 0 : Math.min(1, BGM_LEVEL * pct);
   }
 
-  /** D♯maj7 pad — soft chorus + light triangle for bubble / shimmer; slow breath on level. */
-  function startSunshineParkPad() {
-    if (!audioCtx || !masterGain || shimmerParkPadOscs.length) return;
-    const t = audioCtx.currentTime;
-    const bus = audioCtx.createGain();
-    bus.gain.setValueAtTime(0.00235, t);
-    shimmerParkPadBus = bus;
-
-    const hp = audioCtx.createBiquadFilter();
-    hp.type = "highpass";
-    hp.frequency.value = 130;
-    hp.Q.value = 0.35;
-    const pk = audioCtx.createBiquadFilter();
-    pk.type = "peaking";
-    pk.frequency.value = 2650;
-    pk.Q.value = 0.55;
-    pk.gain.value = 4.0;
-    hp.connect(pk);
-    pk.connect(bus);
-    bus.connect(masterGain);
-    shimmerParkPadHp = hp;
-    shimmerParkPadPk = pk;
-
-    /* Very slow swell — keeps the pad from feeling like a static tone. */
-    const breath = audioCtx.createOscillator();
-    breath.type = "sine";
-    breath.frequency.setValueAtTime(0.1, t);
-    const breathAmt = audioCtx.createGain();
-    breathAmt.gain.value = 0.00038;
-    breath.connect(breathAmt);
-    breathAmt.connect(bus.gain);
-    breath.start(t);
-    shimmerParkPadOscs.push(breath);
-
-    /* D♯4, G4, A♯4, D5 — close maj7 (12-TET). */
-    const layers = [
-      { f: 311.127, w: 0.35 },
-      { f: 391.995, w: 0.31 },
-      { f: 466.164, w: 0.27 },
-      { f: 587.33, w: 0.17 },
-    ];
-    const human = () => (Math.random() - 0.5) * 1.2;
-
-    layers.forEach(({ f, w }) => {
-      const triWeight = f > 520 ? 0.09 : 0.15;
-      const voices = [
-        { type: "sine", det: 0, frac: 0.45 },
-        { type: "sine", det: 7.2, frac: 0.28 },
-        { type: "sine", det: -7.2, frac: 0.28 },
-        { type: "triangle", det: 2.5, frac: triWeight },
-      ];
-      voices.forEach(({ type, det, frac }) => {
-        const o = audioCtx.createOscillator();
-        o.type = type;
-        o.frequency.setValueAtTime(f, t);
-        o.detune.setValueAtTime(det + human(), t);
-        const g = audioCtx.createGain();
-        g.gain.value = w * frac;
-        o.connect(g);
-        g.connect(hp);
-        o.start(t);
-        shimmerParkPadOscs.push(o);
-      });
-    });
+  function bgmSessionActive() {
+    return (
+      startScreen &&
+      startScreen.classList.contains("overlay--hidden") &&
+      !gameOver
+    );
   }
 
-  function stopSunshineParkPad() {
-    shimmerParkPadOscs.forEach((o) => {
-      try {
-        o.stop();
-      } catch (_) {}
-    });
-    shimmerParkPadOscs = [];
-    if (shimmerParkPadPk) {
-      try {
-        shimmerParkPadPk.disconnect();
-      } catch (_) {}
-      shimmerParkPadPk = null;
+  function startBackgroundMusic() {
+    initAudio();
+    const el = ensureBgMusic();
+    syncBgMusicVolumeFromUi();
+    if (document.getElementById("muteToggle")?.checked) {
+      el.pause();
+      return;
     }
-    if (shimmerParkPadHp) {
-      try {
-        shimmerParkPadHp.disconnect();
-      } catch (_) {}
-      shimmerParkPadHp = null;
-    }
-    if (shimmerParkPadBus) {
-      try {
-        shimmerParkPadBus.disconnect();
-      } catch (_) {}
-      shimmerParkPadBus = null;
-    }
+    el.play().catch(() => {});
   }
 
-  /**
-   * Bubblegum bells — bright, bouncy, no slow vibrato (that reads “sly”); clean happy pops.
-   */
-  function playBoardwalkPhrase() {
-    if (!audioCtx || !masterGain) return;
-    const phrases = [
-      [1047, 1175, 1319, 1398],
-      [1175, 1319, 1398, 1568],
-      [988, 1047, 1175, 1319],
-      [1047, 1175, 1245, 1319],
-    ];
-    const phrase = phrases[Math.floor(Math.random() * phrases.length)];
-    let tMs = 0;
-
-    phrase.forEach((freq, i) => {
-      const humanMs = (Math.random() - 0.5) * 4;
-      const noteLenMs = 118 + Math.random() * 28;
-      const gapMs = 44 + Math.random() * 22 + (i % 2 === 0 ? 6 : 0);
-      const startAt = Math.max(0, tMs + humanMs);
-      tMs = startAt + noteLenMs + gapMs;
-
-      setTimeout(() => {
-        if (!shimmerActive || !audioCtx || !masterGain) return;
-        const now = audioCtx.currentTime;
-        const dur = noteLenMs / 1000;
-        const stopT = now + dur + 0.16;
-        const centsDrift = (Math.random() - 0.5) * 3;
-
-        const out = audioCtx.createGain();
-        out.gain.setValueAtTime(1, now);
-        out.connect(masterGain);
-
-        const filter = audioCtx.createBiquadFilter();
-        filter.type = "lowpass";
-        filter.frequency.setValueAtTime(5600 + Math.random() * 700, now);
-        filter.Q.value = 0.14;
-
-        const bloom = Math.min(0.028, dur * 0.22);
-        const osc = audioCtx.createOscillator();
-        osc.type = "sine";
-        osc.detune.setValueAtTime(centsDrift, now);
-        osc.frequency.setValueAtTime(freq * 1.004, now);
-        osc.frequency.linearRampToValueAtTime(freq, now + bloom);
-
-        const oscB = audioCtx.createOscillator();
-        oscB.type = "triangle";
-        oscB.detune.setValueAtTime(centsDrift + 12, now);
-        oscB.frequency.setValueAtTime(freq * 1.004, now);
-        oscB.frequency.linearRampToValueAtTime(freq, now + bloom);
-
-        const gA = audioCtx.createGain();
-        const gB = audioCtx.createGain();
-        gA.gain.value = 0.72;
-        gB.gain.value = 0.14;
-
-        const env = audioCtx.createGain();
-        env.gain.setValueAtTime(0, now);
-        const peak = 0.0054 + Math.random() * 0.0009;
-        env.gain.linearRampToValueAtTime(peak, now + 0.022 + Math.random() * 0.008);
-        env.gain.linearRampToValueAtTime(peak * 0.58, now + dur * 0.48);
-        env.gain.linearRampToValueAtTime(0, now + dur + 0.16);
-
-        osc.connect(gA);
-        oscB.connect(gB);
-        gA.connect(filter);
-        gB.connect(filter);
-        filter.connect(env);
-        env.connect(out);
-
-        const h2 = audioCtx.createOscillator();
-        h2.type = "sine";
-        h2.frequency.setValueAtTime(freq * 2.0, now);
-        const e2 = audioCtx.createGain();
-        e2.gain.setValueAtTime(0, now);
-        e2.gain.linearRampToValueAtTime(0.00115, now + 0.028);
-        e2.gain.linearRampToValueAtTime(0, now + dur * 0.5 + 0.05);
-        h2.connect(e2);
-        e2.connect(out);
-
-        osc.start(now);
-        osc.stop(stopT);
-        oscB.start(now);
-        oscB.stop(stopT);
-        h2.start(now);
-        h2.stop(stopT);
-      }, startAt);
-    });
+  function pauseBackgroundMusic() {
+    if (!bgMusic) return;
+    bgMusic.pause();
   }
 
-  /** Quick sugary glint — bright, short, fizzy (not a long mysterious tail). */
-  function playStarryPing() {
-    if (!audioCtx || !masterGain) return;
-    const now = audioCtx.currentTime;
-    const fairyHz = [2637.02, 2793.83, 3135.96, 3520.0];
-    const root = fairyHz[Math.floor(Math.random() * fairyHz.length)];
-    const stopT = now + 0.11;
-
-    const air = audioCtx.createBiquadFilter();
-    air.type = "lowpass";
-    air.frequency.setValueAtTime(7200, now);
-    air.Q.value = 0.22;
-
-    const out = audioCtx.createGain();
-    out.connect(air);
-    air.connect(masterGain);
-
-    const osc = audioCtx.createOscillator();
-    osc.type = "sine";
-    osc.frequency.setValueAtTime(root, now);
-
-    const env = audioCtx.createGain();
-    env.gain.setValueAtTime(0, now);
-    env.gain.linearRampToValueAtTime(0.0029 + Math.random() * 0.0007, now + 0.011);
-    env.gain.linearRampToValueAtTime(0, now + 0.084);
-    osc.connect(env);
-    env.connect(out);
-
-    const h = audioCtx.createOscillator();
-    h.type = "sine";
-    h.frequency.setValueAtTime(root * 2, now);
-    const he = audioCtx.createGain();
-    he.gain.setValueAtTime(0, now);
-    he.gain.linearRampToValueAtTime(0.00055, now + 0.018);
-    he.gain.linearRampToValueAtTime(0, now + 0.065);
-    h.connect(he);
-    he.connect(out);
-
-    osc.start(now);
-    osc.stop(stopT);
-    h.start(now);
-    h.stop(stopT);
-  }
-
-  function scheduleStarryPing() {
-    if (!shimmerActive) return;
-    playStarryPing();
-    shimmerStarryTimeout = setTimeout(scheduleStarryPing, 1350 + Math.random() * 800);
-  }
-
-  function scheduleShimmerBark() {
-    if (!shimmerActive) return;
-    playCuteBark();
-    shimmerBarkInterval = setTimeout(scheduleShimmerBark, 4000 + Math.random() * 2200);
-  }
-
-  function startShimmer() {
-    if (!audioCtx || !masterGain || shimmerActive) return;
-    shimmerActive = true;
-    startSunshineParkPad();
-    const scheduleChirp = () => {
-      if (!shimmerActive) return;
-      playBirdChirp();
-      if (Math.random() < 0.34) {
-        setTimeout(() => {
-          if (shimmerActive) playBirdChirp();
-        }, 85);
-      }
-      const delay = 1550 + Math.random() * 950;
-      shimmerInterval = setTimeout(scheduleChirp, delay);
-    };
-    const scheduleBoardwalk = () => {
-      if (!shimmerActive) return;
-      playBoardwalkPhrase();
-      const delay = 1380 + Math.random() * 620;
-      shimmerBoardwalkInterval = setTimeout(scheduleBoardwalk, delay);
-    };
-    scheduleChirp();
-    scheduleBoardwalk();
-    scheduleStarryPing();
-    scheduleShimmerBark();
-  }
-
-  function stopShimmer() {
-    shimmerActive = false;
-    stopSunshineParkPad();
-    if (shimmerInterval) {
-      clearTimeout(shimmerInterval);
-      shimmerInterval = null;
-    }
-    if (shimmerBoardwalkInterval) {
-      clearTimeout(shimmerBoardwalkInterval);
-      shimmerBoardwalkInterval = null;
-    }
-    if (shimmerStarryTimeout) {
-      clearTimeout(shimmerStarryTimeout);
-      shimmerStarryTimeout = null;
-    }
-    if (shimmerBarkInterval) {
-      clearTimeout(shimmerBarkInterval);
-      shimmerBarkInterval = null;
-    }
+  /** Pause and rewind for a new session (Play Again / reset). */
+  function stopBackgroundMusicForRound() {
+    if (!bgMusic) return;
+    bgMusic.pause();
+    bgMusic.currentTime = 0;
   }
 
 
@@ -726,8 +328,9 @@
     if (gameOver) return;
     gameOver = true;
     gameStarted = false;
+    laneInputBuffers = [null, null, null, null];
     showJudgement("Time's up!");
-    stopShimmer();
+    pauseBackgroundMusic();
     setTimeout(() => {
       if (resultsScoreEl) resultsScoreEl.textContent = String(score);
       if (resultsPerfectEl) resultsPerfectEl.textContent = String(perfectCount);
@@ -749,6 +352,7 @@
     spawnTimer = 0;
     lastTime = null;
     notes = [];
+    laneInputBuffers = [null, null, null, null];
     gameArea.querySelectorAll(".note").forEach((el) => el.remove());
     gameArea.classList.remove(
       "game-area--perfect-glow",
@@ -761,7 +365,7 @@
     updateTimeDisplay();
     if (comboEl) comboEl.textContent = "0";
     if (comboDisplay) comboDisplay.classList.remove("combo-display--pop");
-    stopShimmer();
+    stopBackgroundMusicForRound();
     if (resultsScreen) resultsScreen.classList.add("overlay--hidden");
     if (startScreen) startScreen.classList.remove("overlay--hidden");
   }
@@ -777,60 +381,109 @@
     }, LANE_FLASH_MS);
   }
 
-  function handleHit(laneIndex) {
-    flashLane(laneIndex);
-    if (!gameStarted) {
-      gameStarted = true;
-    }
+  function goodZoneTop() {
+    return HIT_Y - GOOD_HALF_PX;
+  }
 
-    // Find the closest note in this lane near the hit window
-    let bestNote = null;
-    let bestDistance = Infinity;
-    const PERFECT_WINDOW = 16;
-    const GOOD_WINDOW = 32;
-    const MAX_WINDOW = 52;
+  function goodZoneBottom() {
+    return HIT_Y + GOOD_HALF_PX;
+  }
 
+  /**
+   * Nearest uncaught heart in lane whose center is inside the Good band (inclusive).
+   * Hearts above Good top are not caught here (buffer / next frames handle early timing).
+   */
+  function findCatchableNoteInLane(laneIndex) {
+    const top = goodZoneTop();
+    const bottom = goodZoneBottom();
+    let best = null;
+    let bestDist = Infinity;
     for (const note of notes) {
       if (note.lane !== laneIndex || note.hit) continue;
-      const distance = Math.abs(note.y - HIT_Y);
-      if (distance < bestDistance && distance <= MAX_WINDOW) {
-        bestDistance = distance;
-        bestNote = note;
+      if (note.y < top || note.y > bottom) continue;
+      const d = Math.abs(note.y - HIT_Y);
+      if (d < bestDist) {
+        bestDist = d;
+        best = note;
       }
     }
+    return best;
+  }
 
-    if (!bestNote) {
-      const judgement = "Miss";
-      missCount += 1;
-      showJudgement(judgement);
-      triggerFeedback(judgement, laneIndex);
-      updateCombo(judgement);
-      updateScoreDisplay();
-      return;
-    }
+  function judgementForNoteY(noteY) {
+    const d = Math.abs(noteY - HIT_Y);
+    if (d <= PERFECT_HALF_PX) return "Perfect";
+    if (d <= GOOD_HALF_PX) return "Good";
+    return "Good";
+  }
 
-    let judgement;
-    if (bestDistance <= PERFECT_WINDOW) {
-      judgement = "Perfect";
+  function applyCatch(note, laneIndex) {
+    const judgement = judgementForNoteY(note.y);
+    if (judgement === "Perfect") {
       score += 100;
       perfectCount += 1;
-    } else if (bestDistance <= GOOD_WINDOW) {
-      judgement = "Good";
+    } else {
       score += 50;
       goodCount += 1;
-    } else {
-      judgement = "Miss";
-      missCount += 1;
     }
-
-    bestNote.hit = true;
-    bestNote.el.remove();
-    notes = notes.filter((n) => n !== bestNote);
-
+    note.hit = true;
+    note.el.remove();
+    notes = notes.filter((n) => n !== note);
     showJudgement(judgement);
     triggerFeedback(judgement, laneIndex);
     updateCombo(judgement);
     updateScoreDisplay();
+  }
+
+  /**
+   * If a heart in this lane is in the Good catch band now, catch it. Returns true if caught.
+   */
+  function tryCatchInLane(laneIndex) {
+    const note = findCatchableNoteInLane(laneIndex);
+    if (!note) return false;
+    applyCatch(note, laneIndex);
+    return true;
+  }
+
+  /**
+   * Arrow key: lane flash + optional immediate catch; otherwise store per-lane buffer.
+   * Early presses are never an immediate Miss — expiry or uncaught heart past bottom only.
+   */
+  function onLaneInput(laneIndex) {
+    flashLane(laneIndex);
+    if (!gameStarted) {
+      gameStarted = true;
+    }
+    if (tryCatchInLane(laneIndex)) {
+      laneInputBuffers[laneIndex] = null;
+      return;
+    }
+    laneInputBuffers[laneIndex] = { expiresAt: performance.now() + INPUT_BUFFER_MS };
+  }
+
+  /**
+   * Resolve buffered inputs after note movement: auto-catch when heart enters Good zone,
+   * or Miss when buffer expires with no catch (ghost / too-early tap).
+   */
+  function updateLaneInputBuffers() {
+    const now = performance.now();
+    for (let lane = 0; lane < 4; lane++) {
+      const buf = laneInputBuffers[lane];
+      if (!buf) continue;
+      if (tryCatchInLane(lane)) {
+        laneInputBuffers[lane] = null;
+        continue;
+      }
+      if (now >= buf.expiresAt) {
+        const judgement = "Miss";
+        missCount += 1;
+        showJudgement(judgement);
+        triggerFeedback(judgement, lane);
+        updateCombo(judgement);
+        updateScoreDisplay();
+        laneInputBuffers[lane] = null;
+      }
+    }
   }
 
   function update(deltaMs) {
@@ -854,6 +507,9 @@
         note.y += noteSpeed * deltaSec;
         note.el.style.transform = `translateY(${note.y}px)`;
       }
+
+      // Buffered early taps: catch once heart enters Good zone, or Miss on buffer expiry
+      updateLaneInputBuffers();
 
       // Remove notes that fall past the bottom and count as Miss
       const BOTTOM_LIMIT = 420;
@@ -905,7 +561,7 @@
         const volSlider = document.getElementById("volumeSlider");
         const mute = document.getElementById("muteToggle")?.checked;
         if (volSlider) setMasterVolume(mute ? 0 : parseInt(volSlider.value, 10) / 100);
-        if (document.getElementById("shimmerToggle")?.checked && !mute) startShimmer();
+        startBackgroundMusic();
         startScreen.classList.add("overlay--hidden");
         const active = document.querySelector(".difficulty-btn--active");
         const diff = (active && active.dataset.difficulty) ? active.dataset.difficulty : "normal";
@@ -922,7 +578,7 @@
     if (laneIndex === -1) return;
 
     event.preventDefault();
-    handleHit(laneIndex);
+    onLaneInput(laneIndex);
   });
 
   if (playAgainBtn) {
@@ -944,10 +600,12 @@
   if (volumeSlider && volumeValueEl) {
     volumeSlider.addEventListener("input", () => {
       initAudio();
-      if (muteToggle?.checked) return;
       const pct = parseInt(volumeSlider.value, 10);
-      setMasterVolume(pct / 100);
+      if (!muteToggle?.checked) {
+        setMasterVolume(pct / 100);
+      }
       volumeValueEl.textContent = pct + "%";
+      syncBgMusicVolumeFromUi();
     });
   }
   if (muteToggle) {
@@ -955,24 +613,15 @@
       initAudio();
       if (muteToggle.checked) {
         setMasterVolume(0);
+        pauseBackgroundMusic();
       } else {
         const pct = parseInt(volumeSlider?.value ?? 70, 10);
         setMasterVolume(pct / 100);
         if (volumeValueEl) volumeValueEl.textContent = pct + "%";
-      }
-    });
-  }
-
-  const shimmerToggle = document.getElementById("shimmerToggle");
-  if (shimmerToggle) {
-    shimmerToggle.addEventListener("change", () => {
-      const startHidden = startScreen && startScreen.classList.contains("overlay--hidden");
-      const resultsHidden = !resultsScreen || resultsScreen.classList.contains("overlay--hidden");
-      if (shimmerToggle.checked && startHidden && resultsHidden && !gameOver) {
-        initAudio();
-        startShimmer();
-      } else {
-        stopShimmer();
+        syncBgMusicVolumeFromUi();
+        if (bgmSessionActive()) {
+          startBackgroundMusic();
+        }
       }
     });
   }

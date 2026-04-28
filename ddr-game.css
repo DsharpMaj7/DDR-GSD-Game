@@ -6,18 +6,6 @@ html {
   --cloud-speed-base: 50s;           /* <<< Cloud Speed: tweak this value (lower = faster) */
   --cloud-speed-slow: var(--cloud-speed-base);
   --cloud-speed-fast: calc(var(--cloud-speed-base) * 0.7);
-  /* Shepherd coat & face variables */
-  --shep-black-coat: #050816;
-  --shep-black-coat-alt: #111827;
-  --shep-blue-main: #38bdf8;
-  --shep-blue-light: #bae6fd;
-  --shep-pink-main: #f472b6;
-  --shep-pink-light: #fecaca;
-  --shep-bt-black: #020617;
-  --shep-bt-tan: #facc15;
-  --shep-eye: #111827;
-  --shep-nose: #020617;
-  --shep-tongue: #fb7185;
   background: #ffccd3;
 }
 
@@ -723,7 +711,6 @@ body::after {
   color: #831843;
 }
 
-.shimmer-checkbox,
 .mute-checkbox {
   accent-color: #f472b6;
 }
@@ -839,7 +826,7 @@ body::after {
   background: linear-gradient(160deg, rgba(255, 255, 255, 0.82), rgba(214, 243, 236, 0.94));
 }
 
-.shepherd-quadrant--copper {
+.shepherd-quadrant--whiskey {
   background: linear-gradient(160deg, rgba(255, 252, 247, 0.95), rgba(254, 234, 213, 0.92));
 }
 
@@ -860,10 +847,49 @@ body::after {
   width: 100%;
 }
 
-/* Scale cartoon without clobbering transform animations on .shepherd-dog */
+/* Scale + center kawaii PNGs in each quadrant tile */
 .shepherd-dog-scale {
-  transform: scale(0.76);
-  transform-origin: 50% 85%;
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 0;
+  width: 100%;
+  transform: scale(1.02);
+  transform-origin: 50% 92%;
+}
+
+.shepherd-dog {
+  position: relative;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  width: 100%;
+  max-width: 108px;
+  height: 100%;
+  max-height: 118px;
+  margin: 0 auto;
+  background: transparent;
+  transform-origin: 50% 100%;
+  animation: shepherd-dance 1.2s ease-in-out infinite alternate;
+  will-change: transform;
+}
+
+.shepherd-dog-img {
+  width: 100%;
+  height: 100%;
+  max-width: 104px;
+  max-height: 112px;
+  object-fit: contain;
+  object-position: 50% 100%;
+  display: block;
+  pointer-events: none;
+  user-select: none;
+  -webkit-user-drag: none;
+  /* Soft kawaii art: avoid crisp-edges (looks harsh on PNG gradients) */
+  image-rendering: auto;
+  -webkit-backface-visibility: hidden;
+  backface-visibility: hidden;
 }
 
 .shepherd-quadrant-label {
@@ -891,155 +917,6 @@ body::after {
   opacity: 0.95;
 }
 
-.shepherd-dog {
-  position: relative;
-  width: 54px;
-  height: 70px;
-  transform-origin: 50% 100%;
-  animation: shepherd-dance 1.2s ease-in-out infinite alternate;
-}
-
-.dog-body {
-  position: absolute;
-  bottom: 8px;
-  left: 6px;
-  width: 42px;
-  height: 30px;
-  border-radius: 16px 20px 16px 14px;
-}
-
-.dog-head {
-  position: absolute;
-  bottom: 22px;
-  left: -4px;
-  width: 24px;
-  height: 22px;
-  border-radius: 14px 16px 12px 14px;
-}
-
-.dog-face {
-  position: absolute;
-  inset: 7px 4px 2px 2px;
-  border-radius: inherit;
-  background: radial-gradient(circle at 40% 35%, rgba(255, 255, 255, 0.85), transparent 55%);
-  opacity: 0.85;
-}
-
-.dog-face::before {
-  content: "";
-  position: absolute;
-  top: 1px;  /* slightly higher on the face */
-  left: 6px;
-  width: 4px;
-  height: 4px;
-  border-radius: 999px;
-  background: var(--shep-eye);
-  box-shadow: 10px 0 0 0 var(--shep-eye);
-}
-
-.dog-face::after {
-  content: "";
-  position: absolute;
-  left: 9px;
-  bottom: 2px;  /* let tongue extend lower */
-  width: 8px;
-  height: 8px;
-  border-radius: 50% 50% 70% 70%;
-  background:
-    radial-gradient(circle at 50% 0%, var(--shep-nose) 0 2px, transparent 3px),
-    radial-gradient(circle at 30% 100%, rgba(0, 0, 0, 0.8) 0 1px, transparent 2px),
-    radial-gradient(circle at 70% 100%, rgba(0, 0, 0, 0.8) 0 1px, transparent 2px),
-    radial-gradient(circle at 50% 130%, var(--shep-tongue) 0 3px, transparent 4px);
-}
-
-.dog-ear {
-  position: absolute;
-  width: 10px;
-  height: 21px; /* ~15% longer */
-  top: -8px;
-  /* tapered, pointy end with softer base */
-  border-radius: 80% 80% 25% 25%;
-}
-
-.dog-ear--left {
-  left: -1px;  /* nudged slightly closer to center */
-  transform: rotate(-6deg);
-}
-
-.dog-ear--right {
-  right: -1px; /* nudged slightly closer to center */
-  transform: rotate(10deg);
-}
-
-.dog-leg {
-  position: absolute;
-  bottom: 0;
-  width: 10px;
-  height: 16px;
-  border-radius: 999px;
-}
-
-.dog-leg--front {
-  left: 10px;
-}
-
-.dog-leg--back {
-  right: 4px;
-}
-
-.dog-tail {
-  position: absolute;
-  left: 34px;  /* anchor tail base around 75% of body width */
-  bottom: 12px; /* deeper overlap into body so no gap is visible */
-  width: 28px;  /* ~25% longer */
-  height: 22px; /* was 9px → ~150% thicker */
-  border-radius: 999px; /* rounded base */
-  /* soft, gently wavy tail – not curly, slight up-then-down arc; base sits flush with body */
-  clip-path: polygon(
-    0 40%,   /* base closer to body */
-    30% 28%, /* slight rise */
-    60% 38%, /* gentle dip */
-    100% 32%,/* tapered tip */
-    60% 62%, /* lower wave */
-    30% 58%  /* back toward base */
-  );
-  transform-origin: 0% 50%;
-  animation: tail-wag 0.5s ease-in-out infinite;
-}
-
-/* Coat color variations */
-.shepherd-dog--black .dog-body,
-.shepherd-dog--black .dog-head,
-.shepherd-dog--black .dog-ear,
-.shepherd-dog--black .dog-leg,
-.shepherd-dog--black .dog-tail {
-  background: linear-gradient(145deg, var(--shep-black-coat), var(--shep-black-coat-alt));
-}
-
-.shepherd-dog--sable .dog-body,
-.shepherd-dog--sable .dog-head,
-.shepherd-dog--sable .dog-ear,
-.shepherd-dog--sable .dog-leg,
-.shepherd-dog--sable .dog-tail {
-  background: linear-gradient(140deg, #78350f, #fbbf24);
-}
-
-.shepherd-dog--pink .dog-body,
-.shepherd-dog--pink .dog-head,
-.shepherd-dog--pink .dog-ear,
-.shepherd-dog--pink .dog-leg,
-.shepherd-dog--pink .dog-tail {
-  background: linear-gradient(145deg, var(--shep-pink-main), var(--shep-pink-light));
-}
-
-.shepherd-dog--blacktan .dog-body,
-.shepherd-dog--blacktan .dog-head,
-.shepherd-dog--blacktan .dog-ear,
-.shepherd-dog--blacktan .dog-leg,
-.shepherd-dog--blacktan .dog-tail {
-  background: linear-gradient(150deg, var(--shep-bt-black) 0 40%, var(--shep-bt-tan) 45% 100%);
-}
-
 /* Base dance motion */
 @keyframes shepherd-dance {
   0% {
@@ -1053,49 +930,9 @@ body::after {
   }
 }
 
-@keyframes shepherd-head-bob {
-  0% {
-    transform: translate3d(0, 0, 0) rotate(0deg);
-  }
-  50% {
-    transform: translate3d(0, -2px, 0) rotate(-3deg);
-  }
-  100% {
-    transform: translate3d(0, 1px, 0) rotate(2deg);
-  }
-}
-
-@keyframes tail-wag {
-  0% {
-    transform: rotate(10deg);
-  }
-  50% {
-    transform: rotate(-14deg);
-  }
-  100% {
-    transform: rotate(8deg);
-  }
-}
-
-@keyframes tongue-wiggle {
-  0% {
-    transform: scaleY(1);
-  }
-  50% {
-    transform: scaleY(0.9);
-  }
-  100% {
-    transform: scaleY(1);
-  }
-}
-
 /* Mood reactions */
 .shepherd-stage--hype .shepherd-dog {
   animation-name: shepherd-dance-hype;
-  animation-duration: 0.3s;
-}
-
-.shepherd-stage--hype .shep-tail {
   animation-duration: 0.3s;
 }
 

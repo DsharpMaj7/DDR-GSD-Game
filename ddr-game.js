@@ -4,6 +4,7 @@
   const comboEl = document.getElementById("combo");
   const comboDisplay = comboEl ? comboEl.parentElement : null;
   const judgementEl = document.getElementById("judgement");
+  const statusInstructionEl = document.getElementById("statusInstruction");
   const timeEl = document.getElementById("timeRemaining");
   const shepherdStage = document.getElementById("shepherdStage");
   const startScreen = document.getElementById("startScreen");
@@ -34,6 +35,9 @@
    */
   const INPUT_BUFFER_MS = 200;
 
+  const STATUS_READY = "Ready — press any arrow key to start";
+  const STATUS_GAME_OVER = "Game Over — Press Space to play again";
+
   const DIFFICULTY = {
     easy:   { noteSpeed: 180, spawnInterval: 900 },
     normal: { noteSpeed: 220, spawnInterval: 700 },
@@ -54,6 +58,8 @@
   let gameStarted = false;
   let remainingMs = GAME_DURATION;
   let gameOver = false;
+  /** Cleared on early restart so results overlay cannot appear after reset. */
+  let resultsRevealTimeout = null;
   let shepherdMoodTimeout = null;
   let gameAreaFeedbackTimeout = null;
   const hitLine = gameArea.querySelector(".hit-line");
@@ -62,6 +68,10 @@
   let laneInputBuffers = [null, null, null, null];
 
   gameArea.appendChild(hitEffects);
+
+  function setStatusInstruction(text) {
+    if (statusInstructionEl) statusInstructionEl.textContent = text;
+  }
 
   // —— Web Audio (bubbly SFX, no external files) ——
   // Intensity tweaks:
@@ -191,7 +201,7 @@
   function showJudgement(type) {
     judgementEl.textContent = type ? type : "";
     judgementEl.classList.remove("perfect", "good", "miss");
-    if (type) {
+    if (type === "Perfect" || type === "Good" || type === "Miss") {
       judgementEl.classList.add(type.toLowerCase());
     }
 
@@ -329,9 +339,15 @@
     gameOver = true;
     gameStarted = false;
     laneInputBuffers = [null, null, null, null];
-    showJudgement("Time's up!");
+    showJudgement("");
+    setStatusInstruction(STATUS_GAME_OVER);
     pauseBackgroundMusic();
-    setTimeout(() => {
+    if (resultsRevealTimeout) {
+      clearTimeout(resultsRevealTimeout);
+      resultsRevealTimeout = null;
+    }
+    resultsRevealTimeout = setTimeout(() => {
+      resultsRevealTimeout = null;
       if (resultsScoreEl) resultsScoreEl.textContent = String(score);
       if (resultsPerfectEl) resultsPerfectEl.textContent = String(perfectCount);
       if (resultsGoodEl) resultsGoodEl.textContent = String(goodCount);
@@ -340,7 +356,19 @@
     }, 800);
   }
 
-  function resetGame() {
+  function applyActiveDifficultyPreset() {
+    const active = document.querySelector(".difficulty-btn--active");
+    const diff = active && active.dataset.difficulty ? active.dataset.difficulty : "normal";
+    const preset = DIFFICULTY[diff] || DIFFICULTY.normal;
+    noteSpeed = preset.noteSpeed;
+    spawnInterval = preset.spawnInterval;
+  }
+
+  function coreResetState() {
+    if (resultsRevealTimeout) {
+      clearTimeout(resultsRevealTimeout);
+      resultsRevealTimeout = null;
+    }
     gameOver = false;
     gameStarted = false;
     score = 0;
@@ -360,14 +388,38 @@
       "game-area--miss-shake",
       "game-area--miss-tint"
     );
-    showJudgement("");
-    updateScoreDisplay();
-    updateTimeDisplay();
     if (comboEl) comboEl.textContent = "0";
     if (comboDisplay) comboDisplay.classList.remove("combo-display--pop");
+    if (hitLine) hitLine.classList.remove("hit-line--perfect", "hit-line--good");
+    if (shepherdMoodTimeout) {
+      clearTimeout(shepherdMoodTimeout);
+      shepherdMoodTimeout = null;
+    }
+    if (gameAreaFeedbackTimeout) {
+      clearTimeout(gameAreaFeedbackTimeout);
+      gameAreaFeedbackTimeout = null;
+    }
+    if (shepherdStage) {
+      shepherdStage.classList.remove("shepherd-stage--hype", "shepherd-stage--sad");
+    }
     stopBackgroundMusicForRound();
+  }
+
+  /** After game over: same as first run — board visible, Space not needed again until next time's up. */
+  function restartFromGameOver() {
+    coreResetState();
+    showJudgement("");
+    setStatusInstruction(STATUS_READY);
+    updateScoreDisplay();
+    updateTimeDisplay();
     if (resultsScreen) resultsScreen.classList.add("overlay--hidden");
-    if (startScreen) startScreen.classList.remove("overlay--hidden");
+    if (startScreen) startScreen.classList.add("overlay--hidden");
+    initAudio();
+    const volSlider = document.getElementById("volumeSlider");
+    const mute = document.getElementById("muteToggle")?.checked;
+    if (volSlider) setMasterVolume(mute ? 0 : parseInt(volSlider.value, 10) / 100);
+    applyActiveDifficultyPreset();
+    startBackgroundMusic();
   }
 
   const LANE_FLASH_MS = 150; /* tweak: lane highlight duration (100–160ms) */
@@ -453,6 +505,7 @@
     flashLane(laneIndex);
     if (!gameStarted) {
       gameStarted = true;
+      setStatusInstruction("");
     }
     if (tryCatchInLane(laneIndex)) {
       laneInputBuffers[laneIndex] = null;
@@ -554,6 +607,12 @@
   }
 
   window.addEventListener("keydown", (event) => {
+    if (gameOver && event.key === " ") {
+      event.preventDefault();
+      restartFromGameOver();
+      return;
+    }
+
     if (startScreen && !startScreen.classList.contains("overlay--hidden")) {
       event.preventDefault();
       if (event.key === " ") {
@@ -563,11 +622,8 @@
         if (volSlider) setMasterVolume(mute ? 0 : parseInt(volSlider.value, 10) / 100);
         startBackgroundMusic();
         startScreen.classList.add("overlay--hidden");
-        const active = document.querySelector(".difficulty-btn--active");
-        const diff = (active && active.dataset.difficulty) ? active.dataset.difficulty : "normal";
-        const preset = DIFFICULTY[diff] || DIFFICULTY.normal;
-        noteSpeed = preset.noteSpeed;
-        spawnInterval = preset.spawnInterval;
+        applyActiveDifficultyPreset();
+        setStatusInstruction(STATUS_READY);
       }
       return;
     }
@@ -583,7 +639,7 @@
 
   if (playAgainBtn) {
     playAgainBtn.addEventListener("click", () => {
-      resetGame();
+      restartFromGameOver();
     });
   }
 
@@ -637,6 +693,7 @@
   updateScoreDisplay();
   updateTimeDisplay();
   showJudgement("");
+  setStatusInstruction(STATUS_READY);
   requestAnimationFrame(loop);
 })();
 
